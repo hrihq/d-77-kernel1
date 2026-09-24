@@ -145,10 +145,18 @@ jobs:
         # Debug: verify the compiler probes the tree runs at prepare-compiler-check
         echo "=== compiler probe diagnostics ==="
         "$CLANG_PATH/bin/clang" --version | head -n1
-        "$CLANG_PATH/bin/clang" -Werror -Wall -Wundef -Wstrict-prototypes \
-          -Wno-trigraphs -fno-strict-aliasing -fno-common -fshort-wchar \
-          -std=gnu89 -fstack-protector-strong -c -x c /dev/null -o /dev/null \
-          && echo "PROBE OK" || echo "PROBE FAILED"
+        PROBE_FLAGS="-Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
+          -fno-strict-aliasing -fno-common -fshort-wchar \
+          -Werror-implicit-function-declaration -Wno-format-security -std=gnu89 \
+          --target=aarch64-linux-gnu --prefix=aarch64-linux-gnu- --gcc-toolchain=/ \
+          -no-integrated-as -Werror=unknown-warning-option -Werror"
+        "$CLANG_PATH/bin/clang" $PROBE_FLAGS -fstack-protector-strong \
+          -c -x c /dev/null -o /tmp/probe.o && echo "PROBE OK" || echo "PROBE FAILED"
+        "$CLANG_PATH/bin/clang" $PROBE_FLAGS -c -x c /dev/null -o /tmp/probe2.o \
+          && echo "BASE PROBE OK" || echo "BASE PROBE FAILED"
+        echo "=== which elfedit ==="
+        which aarch64-linux-gnu-elfedit || echo "no elfedit (expected)"
+        echo "CC=$CC LD=$LD"
 
         # clang 14 (r450784d) is stricter than the clang the tree was built for:
         # techpack/audio + power/supply trip -Werror=address/-Werror=format.
