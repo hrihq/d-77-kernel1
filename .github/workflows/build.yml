@@ -46,6 +46,7 @@ jobs:
 
       - name: Configure
         run: |
+          mkdir -p $OUTPUT
           make O=$OUTPUT ARCH=$ARCH \
             CC=clang \
             LD=ld.lld \
