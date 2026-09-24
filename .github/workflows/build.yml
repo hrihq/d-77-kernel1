@@ -1,0 +1,101 @@
+name: Build D-77 Kernel1
+
+on:
+  push:
+    branches: [ d-77 ]
+  workflow_dispatch:
+
+env:
+  ARCH: arm64
+  DEFCONFIG: vendor/sweet_user_defconfig
+  OUTPUT: out
+  CLANG_TUPLE: aarch64-linux-gnu-
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: d-77
+          fetch-depth: 1
+
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y bc bison flex build-essential \
+            libssl-dev libelf-dev python3 zip unzip curl git ccache
+
+      - name: Install LLVM (clang + lld)
+        run: |
+          # 4.14 + LTO_CLANG: use clang-17 (last with good 4.14 LTO support)
+          wget -q https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh 17
+          sudo apt-get install -qq -y llvm-17 lld-17 clang-17
+          sudo ln -sf /usr/bin/clang-17 /usr/bin/clang
+          sudo ln -sf /usr/bin/ld.lld-17 /usr/bin/ld.lld
+          clang --version
+
+      - name: Install GNU toolchain (CROSS_COMPILE)
+        run: |
+          sudo apt-get install -qq -y gcc-aarch64-linux-gnu
+          aarch64-linux-gnu-as --version | head -1
+
+      - name: Configure
+        run: |
+          make O=$OUTPUT ARCH=$ARCH \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar-17 NM=llvm-nm-17 OBJCOPY=llvm-objcopy-17 OBJDUMP=llvm-objdump-17 STRIP=llvm-strip-17 \
+            CROSS_COMPILE=$CLANG_TUPLE CROSS_COMPILE_ARM32=arm-linux-gnu- \
+            ${DEFCONFIG} 2>&1 | tee $OUTPUT/configure.log
+
+      - name: Build
+        run: |
+          make O=$OUTPUT ARCH=$ARCH -j$(nproc) \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar-17 NM=llvm-nm-17 OBJCOPY=llvm-objcopy-17 OBJDUMP=llvm-objdump-17 STRIP=llvm-strip-17 \
+            CROSS_COMPILE=$CLANG_TUPLE CROSS_COMPILE_ARM32=arm-linux-gnu- \
+            LOCALVERSION=-D77-kernel1 2>&1 | tee $OUTPUT/build.log
+
+      - name: Collect artifacts
+        id: collect
+        run: |
+          cd $OUTPUT
+          ls -la arch/arm64/boot/ || true
+          IMG=arch/arm64/boot/Image.gz-dtb
+          if [ -f "$IMG" ]; then
+            echo "found=$IMG" >> $GITHUB_OUTPUT
+            cp $IMG Image.gz-dtb
+            echo "## Build OK" > $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            file Image.gz-dtb >> $GITHUB_STEP_SUMMARY
+            ls -lh Image.gz-dtb >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "found=" >> $GITHUB_OUTPUT
+            echo "## Build FAILED — no Image.gz-dtb" > $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Upload kernel
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: D77-kernel1-Image-gz-dtb
+          path: ${{ env.OUTPUT }}/Image.gz-dtb
+          if-no-files-found: error
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            ${{ env.OUTPUT }}/configure.log
+            ${{ env.OUTPUT }}/build.log
+          if-no-files-found: ignore
