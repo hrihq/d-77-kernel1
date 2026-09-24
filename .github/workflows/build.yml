@@ -4,99 +4,212 @@ on:
   push:
     branches: [ d-77 ]
   workflow_dispatch:
-
-env:
-  ARCH: arm64
-  DEFCONFIG: vendor/sweet_user_defconfig
-  OUTPUT: out
-  CLANG_TUPLE: aarch64-linux-gnu-
+    inputs:
+      build_type:
+        description: 'Select Build Type'
+        required: true
+        default: 'MIUI-OOS'
+        type: choice
+        options:
+          - MIUI-OOS
+          - AOSP
+      compiler:
+        description: 'Select Compiler'
+        required: true
+        default: 'AOSP-Clang'
+        type: choice
+        options:
+          - AOSP-Clang
+          - Neutron-Clang
 
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    permissions:
+      contents: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: d-77
-          fetch-depth: 1
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        ref: d-77
+        fetch-depth: 1
 
-      - name: Install deps
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -qq -y bc bison flex build-essential \
-            libssl-dev libelf-dev python3 zip unzip curl git ccache
+    - name: Prepare timezone
+      run: sudo ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
 
-      - name: Install LLVM (clang + lld)
-        run: |
-          # 4.14 + LTO_CLANG: use clang-17 (last with good 4.14 LTO support)
-          wget -q https://apt.llvm.org/llvm.sh
-          sudo bash llvm.sh 17
-          sudo apt-get install -qq -y llvm-17 lld-17 clang-17
-          sudo ln -sf /usr/bin/clang-17 /usr/bin/clang
-          sudo ln -sf /usr/bin/ld.lld-17 /usr/bin/ld.lld
-          clang --version
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y \
+          bc cpio flex bison git python-is-python3 tar perl wget curl \
+          aria2 lz4 libssl-dev libelf-dev libyaml-dev dwarves zip zstd \
+          gcc-aarch64-linux-gnu build-essential
 
-      - name: Install GNU toolchain (CROSS_COMPILE)
-        run: |
-          sudo apt-get install -qq -y gcc-aarch64-linux-gnu
-          aarch64-linux-gnu-as --version | head -1
+    - name: Setup Environment
+      run: |
+        echo "BUILD_TIME=$(TZ=Asia/Jakarta date '+%d%m%Y-%H%M')" >> "$GITHUB_ENV"
+        echo "BUILD_DATE=\"$(TZ=Asia/Jakarta date '+%b %d %Y')\"" >> "$GITHUB_ENV"
 
-      - name: Configure
-        run: |
-          mkdir -p $OUTPUT
-          make O=$OUTPUT ARCH=$ARCH \
-            CC=clang \
-            LD=ld.lld \
-            AR=llvm-ar-17 NM=llvm-nm-17 OBJCOPY=llvm-objcopy-17 OBJDUMP=llvm-objdump-17 STRIP=llvm-strip-17 \
-            CROSS_COMPILE=$CLANG_TUPLE CROSS_COMPILE_ARM32=arm-linux-gnu- \
-            ${DEFCONFIG} 2>&1 | tee $OUTPUT/configure.log
+    - name: Setup Compiler
+      shell: bash
+      run: |
+        set -e
+        mkdir -p clang
+        if [[ "${{ github.event.inputs.compiler || 'AOSP-Clang' }}" == "Neutron-Clang" ]]; then
+          echo "Using Neutron Clang"
+          CLANG_URL=$(curl -fsSL \
+            https://api.github.com/repos/Neutron-Toolchains/clang-build-catalogue/releases/latest |
+            grep "browser_download_url" | grep "neutron-clang" | head -n 1 | cut -d '"' -f 4)
+          echo "Downloading: $CLANG_URL"
+          curl -L "$CLANG_URL" -o neutron-clang.tar.zst
+          tar -C clang -xf neutron-clang.tar.zst
+          rm -f neutron-clang.tar.zst
+        else
+          echo "Using AOSP Clang"
+          CLANG_URL=$(curl -fsSL \
+            https://api.github.com/repos/bachnxuan/aosp_clang_mirror/releases/latest |
+            grep "browser_download_url" | grep -E 'clang-.*\.tar\.gz' | head -n 1 | cut -d '"' -f 4)
+          echo "Downloading: $CLANG_URL"
+          curl -L "$CLANG_URL" -o clang.tar.gz
+          tar -C clang -xf clang.tar.gz
+          rm -f clang.tar.gz
+        fi
+        echo "CLANG_PATH=$GITHUB_WORKSPACE/clang" >> "$GITHUB_ENV"
+        echo
+        echo "Compiler:"
+        "$GITHUB_WORKSPACE/clang/bin/clang" --version | head -n 1
+        "$GITHUB_WORKSPACE/clang/bin/ld.lld" --version | head -n 1
 
-      - name: Build
-        run: |
-          make O=$OUTPUT ARCH=$ARCH -j$(nproc) \
-            CC=clang \
-            LD=ld.lld \
-            AR=llvm-ar-17 NM=llvm-nm-17 OBJCOPY=llvm-objcopy-17 OBJDUMP=llvm-objdump-17 STRIP=llvm-strip-17 \
-            CROSS_COMPILE=$CLANG_TUPLE CROSS_COMPILE_ARM32=arm-linux-gnu- \
-            LOCALVERSION=-D77-kernel1 2>&1 | tee $OUTPUT/build.log
+    - name: Patch Panel Dimensions
+      shell: bash
+      run: |
+        set -e
+        apply_panel_dimensions() {
+            local w="$1"
+            local h="$2"
+            local files=(
+                "arch/arm64/boot/dts/qcom/xiaomi/sweet/dsi-panel-k6-38-0e-0b-fhd-dsc-video.dtsi"
+                "arch/arm64/boot/dts/qcom/xiaomi/sweet/dsi-panel-k6-38-0c-0a-fhd-dsc-video.dtsi"
+            )
+            for f in "${files[@]}"; do
+                if [[ -f "$f" ]]; then
+                    echo "Patching $f -> ${w}x${h}"
+                    sed -i "s/\(qcom,mdss-pan-physical-width-dimension[[:space:]]*=[[:space:]]*< *\)[0-9]\+/\1${w}/" "$f"
+                    sed -i "s/\(qcom,mdss-pan-physical-height-dimension[[:space:]]*=[[:space:]]*< *\)[0-9]\+/\1${h}/" "$f"
+                else
+                    echo "WARN: $f not found"
+                fi
+            done
+        }
+        if [[ "${{ github.event.inputs.build_type || 'MIUI-OOS' }}" == "AOSP" ]]; then
+            apply_panel_dimensions 69 156
+        else
+            apply_panel_dimensions 695 1546
+        fi
 
-      - name: Collect artifacts
-        id: collect
-        run: |
-          cd $OUTPUT
-          ls -la arch/arm64/boot/ || true
-          IMG=arch/arm64/boot/Image.gz-dtb
-          if [ -f "$IMG" ]; then
-            echo "found=$IMG" >> $GITHUB_OUTPUT
-            cp $IMG Image.gz-dtb
-            echo "## Build OK" > $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            file Image.gz-dtb >> $GITHUB_STEP_SUMMARY
-            ls -lh Image.gz-dtb >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          else
-            echo "found=" >> $GITHUB_OUTPUT
-            echo "## Build FAILED — no Image.gz-dtb" > $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
+    - name: Build Kernel
+      shell: bash
+      run: |
+        set -e
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export KBUILD_BUILD_USER=hrihq
+        export KBUILD_BUILD_HOST=D-77
+        export PATH="$CLANG_PATH/bin:$PATH"
+        export CC=clang
+        export LD=ld.lld
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+        export KBUILD_COMPILER_STRING="$(clang --version | head -n1)"
 
-      - name: Upload kernel
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: D77-kernel1-Image-gz-dtb
-          path: ${{ env.OUTPUT }}/Image.gz-dtb
-          if-no-files-found: error
+        echo "========================================="
+        echo "       D-77 Kernel1 Compilation"
+        echo "========================================="
+        echo "Build type : ${{ github.event.inputs.build_type || 'MIUI-OOS' }}"
+        echo "Compiler   : ${{ github.event.inputs.compiler || 'AOSP-Clang' }}"
+        echo "Date       : $BUILD_DATE"
+        echo "Jobs       : $(nproc --all)"
+        echo "========================================="
 
-      - name: Upload logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            ${{ env.OUTPUT }}/configure.log
-            ${{ env.OUTPUT }}/build.log
-          if-no-files-found: ignore
+        make O=out ARCH=arm64 vendor/sweet_user_defconfig
+
+        make -j"$(nproc --all)" O=out ARCH=arm64 2>&1 | tee build.log
+
+        cp out/.config out/defconfig.txt
+
+    - name: Verify Kernel Build
+      shell: bash
+      run: |
+        set -e
+        KERNEL="out/arch/arm64/boot/Image.gz-dtb"
+        failed=0
+        if [[ ! -f "$KERNEL" ]]; then
+          echo "Missing: $KERNEL"
+          failed=1
+        else
+          echo "Found: $KERNEL"
+          ls -lh "$KERNEL"
+        fi
+        for extra in out/arch/arm64/boot/dtbo.img out/arch/arm64/boot/dtb.img; do
+          [[ -f "$extra" ]] && echo "Found: $extra" && ls -lh "$extra"
+        done
+        if [[ "$failed" -ne 0 ]]; then
+          echo "Kernel compilation failed."
+          exit 1
+        fi
+
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log-${{ env.BUILD_TIME }}
+        path: |
+          build.log
+          out/defconfig.txt
+        if-no-files-found: ignore
+
+    - name: Clone AnyKernel3 & Zip
+      shell: bash
+      run: |
+        set -e
+        git clone --depth=1 https://github.com/hrihq/anykernel3.git AnyKernel3
+        cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
+        for extra in dtbo.img dtb.img; do
+          [[ -f "out/arch/arm64/boot/$extra" ]] && cp "out/arch/arm64/boot/$extra" "AnyKernel3/$extra"
+        done
+        cd AnyKernel3
+        zip -r9 "../D-77-kernel1-${{ env.BUILD_TIME }}.zip" . -x ".git/*"
+
+    - name: Upload Flashable Zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: D-77-kernel1-${{ env.BUILD_TIME }}
+        path: D-77-kernel1-${{ env.BUILD_TIME }}.zip
+
+    - name: Publish Release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        TAG="D-77-kernel1-$(TZ=Asia/Jakarta date '+%Y%m%d-%H%M%S')"
+        {
+          echo "## D-77 Kernel1 - Redmi Note 12 Pro 4G (sweet_k6a)"
+          echo ""
+          echo "- Build type: ${{ github.event.inputs.build_type || 'MIUI-OOS' }}"
+          echo "- Compiler: ${{ github.event.inputs.compiler || 'AOSP-Clang' }}"
+          echo "- Kernel: 4.14.336-D77-kernel1"
+          echo "- KernelSU-Next v3.4.0 (syscall table hook, 4.14-compat)"
+          echo "- fake uname 6.12.13 (netbpfload / Android 16 BPF)"
+          echo "- Build date: ${BUILD_DATE}"
+          echo ""
+          echo "Device: sweet / sweet_k6a / sweet2"
+          echo ""
+          echo "### Credits"
+          echo "- Base kernel: Pulkit077/kernel_xiaomi_sweet_k6a"
+          echo "- KernelSU-Next: KernelSU-Next Team"
+          echo "- Maintainer: @hrihq"
+        } > /tmp/notes.md
+        gh release create "$TAG" "D-77-kernel1-${{ env.BUILD_TIME }}.zip" \
+          --repo hrihq/d-77-kernel1 \
+          --title "D-77 Kernel1 ${BUILD_DATE}" \
+          --notes-file /tmp/notes.md
