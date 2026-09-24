@@ -1336,10 +1336,14 @@ ifdef lto-flags
   endif
 endif
 # Make sure compiler supports requested stack protector flag.
+# Android clang (r450784d) passes the probe but the tree's cc-option wrapper
+# fails it under O= builds, so only gate GNU compilers.
 ifdef stackp-name
-  ifeq ($(call cc-option, $(stackp-flag)),)
+  ifneq ($(cc-name),clang)
+    ifeq ($(call cc-option, $(stackp-flag)),)
 	@echo Cannot use CONFIG_CC_STACKPROTECTOR_$(stackp-name): \
 		  $(stackp-flag) not supported by compiler >&2 && exit 1
+    endif
   endif
 endif
 # Make sure compiler does not have buggy stack-protector support.
