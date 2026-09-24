@@ -11,8 +11,11 @@
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
 #define ksu_close_fd close_fd
-#else
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
 #define ksu_close_fd ksys_close
+#else
+// Linux 4.14: no ksys_close, use sys_close directly
+#define ksu_close_fd sys_close
 #endif
 
 static inline struct file *ksu_filp_open_nonotify(const char *path, int flags)

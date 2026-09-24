@@ -42,6 +42,18 @@ static void reset_avc_cache()
     selinux_xfrm_notify_policyload();
 }
 
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
+// Linux 4.14 SELinux internal API is completely different (selinux_ss,
+// static policydb). KSU rule patching is not supported here.
+void apply_kernelsu_rules()
+{
+    pr_info("SELinux rules patching not supported on kernel < 5.0\n");
+}
+void restore_kernelsu_rules()
+{
+}
+#else
 void apply_kernelsu_rules()
 {
     struct selinux_policy *pol, *old_pol = selinux_state.policy;
@@ -554,3 +566,5 @@ out_free:
 
     return ret;
 }
+
+#endif

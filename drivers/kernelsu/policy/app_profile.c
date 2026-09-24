@@ -119,7 +119,11 @@ static void disable_seccomp(void)
     fake->sighand = NULL;
 #endif
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0))
+    put_seccomp_filter(fake); // 4.14 name
+#else
     seccomp_filter_release(fake);
+#endif
     kfree(fake);
 }
 

@@ -13,7 +13,11 @@
 #include <linux/syscalls.h>
 #include <linux/task_work.h>
 #include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
 #include <uapi/linux/mount.h>
+#else
+#include <linux/mount.h>
+#endif
 
 #include "arch.h"
 #include "klog.h" // IWYU pragma: keep
@@ -21,14 +25,21 @@
 #include "infra/su_mount_ns.h"
 #include "util.h"
 
-extern int path_mount(const char *dev_name, struct path *path,
-                      const char *type_page, unsigned long flags,
-                      void *data_page);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
+// 4.14: do_mount is the exported helper (path_mount is internal in 5.x)
+extern long do_mount(const char *dev_name, const char __user *dir_name,
+                     const char *type_page, unsigned long flags, void *data_page);
+#define path_mount(dev, path, type, flags, data)     do_mount(dev, ((const char __user *)(path)), type, flags, data)
+#endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
 #if defined(__aarch64__)
 extern long __arm64_sys_setns(const struct pt_regs *regs);
 #elif defined(__x86_64__)
 extern long __x64_sys_setns(const struct pt_regs *regs);
+#endif
+#else
+extern long sys_setns(int fd, int nstype);
 #endif
 
 static long ksu_sys_setns(int fd, int flags)
@@ -39,12 +50,16 @@ static long ksu_sys_setns(int fd, int flags)
     PT_REGS_PARM1(&regs) = fd;
     PT_REGS_PARM2(&regs) = flags;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
 #if defined(__aarch64__)
     return __arm64_sys_setns(&regs);
 #elif defined(__x86_64__)
     return __x64_sys_setns(&regs);
 #else
 #error "Unsupported arch"
+#endif
+#else
+    return sys_setns(fd, flags);
 #endif
 }
 
@@ -142,9 +157,9 @@ out:
 // individual mode , need CAP_SYS_ADMIN to perform unshare and remount
 static void ksu_mnt_ns_individual(void)
 {
-    long ret = ksys_unshare(CLONE_NEWNS);
+    long ret = sys_unshare(CLONE_NEWNS);
     if (ret) {
-        pr_warn("call ksys_unshare failed: %ld\n", ret);
+        pr_warn("call sys_unshare failed: %ld\n", ret);
         return;
     }
 

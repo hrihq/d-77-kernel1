@@ -12,6 +12,7 @@
 #include "linux/stop_machine.h"
 #include "asm/cacheflush.h"
 #include "asm-generic/fixmap.h"
+#include <asm/memory.h>
 
 // https://github.com/fuqiuluo/ovo/blob/f7da411458e87d32438dc14fce5a3313ed0c967e/ovo/mmuhack.c#L21
 
@@ -44,7 +45,7 @@ unsigned long phys_from_virt(unsigned long addr, int *err)
 #if defined(p4d_leaf)
     if (p4d_leaf(*p4d)) {
         pr_debug("Address 0x%lx maps to a P4D-level huge page\n", addr);
-        return __p4d_to_phys(*p4d) + ((addr & ~P4D_MASK));
+        goto fail;
     }
 #endif
 
@@ -56,7 +57,7 @@ unsigned long phys_from_virt(unsigned long addr, int *err)
 #if defined(pud_leaf)
     if (pud_leaf(*pud)) {
         pr_debug("Address 0x%lx maps to a PUD-level huge page\n", addr);
-        return __pud_to_phys(*pud) + ((addr & ~PUD_MASK));
+        goto fail;
     }
 #endif
 
@@ -66,7 +67,7 @@ unsigned long phys_from_virt(unsigned long addr, int *err)
 #if defined(pmd_leaf)
     if (pmd_leaf(*pmd)) {
         pr_debug("Address 0x%lx maps to a PMD-level huge page\n", addr);
-        return __pmd_to_phys(*pmd) + ((addr & ~PMD_MASK));
+        goto fail;
     }
 #endif
 
@@ -79,7 +80,7 @@ unsigned long phys_from_virt(unsigned long addr, int *err)
     if (!pte_present(*pte))
         goto fail;
 
-    return __pte_to_phys(*pte) + ((addr & ~PAGE_MASK));
+    return __pfn_to_phys(pte_pfn(*pte)) + ((addr & ~PAGE_MASK));
 
 fail:
     *err = -ENOENT;
@@ -102,7 +103,7 @@ fail:
 #define ksu_flush_icache(start, end) caches_clean_inval_pou(start, end)
 #else
 #define ksu_flush_dcache(start, sz) __flush_dcache_area((void *)start, sz)
-#define ksu_flush_icache(start, end) __flush_icache_range(start, end)
+#define ksu_flush_icache(start, end) flush_icache_range(start, end)
 #endif
 
 struct patch_text_info {
@@ -151,7 +152,7 @@ static int ksu_patch_text_nosync(void *dst, void *src, size_t len, int flags)
     void *map = set_fixmap_offset(FIX_TEXT_POKE0, phy);
     pr_debug("fixmap addr for patch 0x%lx: 0x%lx\n", p, (unsigned long)map);
 
-    ret = (int)copy_to_kernel_nofault(map, src, len);
+    ret = (int)probe_kernel_write(map, src, len);
 
     clear_fixmap(FIX_TEXT_POKE0);
 

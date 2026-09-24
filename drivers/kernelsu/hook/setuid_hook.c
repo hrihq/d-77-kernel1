@@ -29,7 +29,9 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
 
     if (unlikely(is_uid_manager(new_uid))) {
         spin_lock_irq(&current->sighand->siglock);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
         ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
+#endif
         ksu_set_task_tracepoint_flag(current);
         spin_unlock_irq(&current->sighand->siglock);
 
@@ -42,7 +44,9 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
         if (current->seccomp.mode == SECCOMP_MODE_FILTER &&
             current->seccomp.filter) {
             spin_lock_irq(&current->sighand->siglock);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
             ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
+#endif
             spin_unlock_irq(&current->sighand->siglock);
         }
         ksu_set_task_tracepoint_flag(current);

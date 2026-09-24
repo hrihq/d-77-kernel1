@@ -19,7 +19,11 @@
 #define __PT_IP_REG pc
 #define __PT_ORIG_SYSCALL_REG regs[8]
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0))
+#define REBOOT_SYMBOL "sys_reboot" // 4.14 arm64: no __arm64_ prefix
+#else
 #define REBOOT_SYMBOL "__arm64_sys_reboot"
+#endif
 #define SYS_READ_SYMBOL "__arm64_sys_read"
 #define SYS_EXECVE_SYMBOL "__arm64_sys_execve"
 // https://cs.android.com/android/kernel/superproject/+/common-android-mainline:common/scripts/syscalltbl.sh;l=57;drc=9142be9e6443fd641ca37f820efe00d9cd890eb1
@@ -70,6 +74,11 @@
 #define PT_REGS_IP(x) (__PT_REGS_CAST(x)->__PT_IP_REG)
 #define PT_REGS_ORIG_SYSCALL(x) (__PT_REGS_CAST(x)->__PT_ORIG_SYSCALL_REG)
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0))
+// 4.14 arm64: kprobe handler receives pt_regs directly, regs[0..] = syscall args
+#define PT_REAL_REGS(regs) ((struct pt_regs *)(regs))
+#else
 #define PT_REAL_REGS(regs) ((struct pt_regs *)PT_REGS_PARM1(regs))
+#endif
 
 #endif

@@ -20,7 +20,10 @@ kernelsu-objs += extras.o
 
 kernelsu-objs += infra/file_wrapper.o
 kernelsu-objs += infra/event_queue.o
+# seccomp action cache requires SECCOMP_ARCH_NATIVE_NR (kernel >= 5.0)
+ifeq ($(shell grep -q "SECCOMP_ARCH_NATIVE" $(srctree)/include/linux/seccomp.h && echo 1),1)
 kernelsu-objs += infra/seccomp_cache.o
+endif
 kernelsu-objs += infra/su_mount_ns.o
 kernelsu-objs += infra/symbol_resolver.o
 

@@ -125,7 +125,11 @@ static int __init ksu_find_ni_syscall_slots(int *out_slots, int max_slots)
     if (!ksu_syscall_table || max_slots <= 0)
         return 0;
 
+    // 4.14 arm64 uses the plain "sys_ni_syscall" name (no __arm64_ pt_regs wrapper
+    // prefix, which only exists from 4.17 with the pt_regs syscall ABI).
     ni_syscall = (unsigned long)ksu_resolve_symbol_for_functable_hook("__arm64_sys_ni_syscall");
+    if (!ni_syscall)
+        ni_syscall = (unsigned long)ksu_resolve_symbol_for_functable_hook("sys_ni_syscall");
 
     pr_info("sys_ni_syscall: 0x%lx\n", ni_syscall);
 

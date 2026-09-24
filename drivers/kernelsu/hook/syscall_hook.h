@@ -4,6 +4,11 @@
 
 #if defined(__x86_64__)
 typedef sys_call_ptr_t syscall_fn_t;
+#elif defined(__aarch64__)
+// Linux 4.14 arm64: sys_call_table is `const void *[]`, entries are
+// `asmlinkage long (*)(const struct pt_regs *)` (pt_regs ABI, >= 4.17 uses
+// the generic asmlinkage long fn(struct pt_regs *) form; 4.14 matches it).
+typedef asmlinkage long (*syscall_fn_t)(const struct pt_regs *regs);
 #endif
 
 extern syscall_fn_t *ksu_syscall_table;

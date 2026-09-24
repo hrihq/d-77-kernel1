@@ -29,6 +29,16 @@
 #include "policy/feature.h"
 #include "hook/lsm_hook.h"
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
+// 4.14 selinux internal API (selinux_policy, status_page, policy field) incompatible.
+// selinux_hide feature disabled; root still works.
+#include <linux/version.h>
+void __init ksu_selinux_hide_init() {}
+void __exit ksu_selinux_hide_exit() {}
+void ksu_selinux_hide_handle_second_stage() {}
+void ksu_selinux_hide_handle_post_fs_data() {}
+void ksu_selinux_hide_drop_backup_if_unused() {}
+#else
 static DEFINE_MUTEX(selinux_hide_mutex);
 static bool ksu_selinux_hide_enabled __read_mostly = false;
 static bool ksu_selinux_hide_running __read_mostly = false;
@@ -244,20 +254,40 @@ call_orig:
     return ((setprocattr_fn)selinux_setprocattr_hook.original)(name, value, size);
 }
 
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
+// 4.14: status_page/status_lock are internal to selinux_ss.
+// Use public selinux_kernel_status_page() + our own mutex.
+#include <linux/cred.h>
+static DEFINE_MUTEX(kfake_status_lock);
+#define selinux_state_lock() mutex_lock(&kfake_status_lock)
+#define selinux_state_unlock() mutex_unlock(&kfake_status_lock)
+static inline struct page *k_selinux_state_status_page(void)
+{
+    return selinux_kernel_status_page(&selinux_state);
+}
+#define SELINUX_STATE_STATUS_PAGE k_selinux_state_status_page()
+#else
+#define selinux_state_lock() selinux_state_lock()
+#define selinux_state_unlock() selinux_state_unlock()
+#define SELINUX_STATE_STATUS_PAGE selinux_state.status_page
+#endif
+
 static DEFINE_STATIC_KEY_FALSE(fake_status_initialize_key);
 static struct page *fake_status = NULL;
 
 static void initialize_fake_status()
 {
-    mutex_lock(&selinux_state.status_lock);
+    selinux_state_lock();
     if (fake_status)
         goto out;
-    if (!selinux_state.status_page) {
+    if (!SELINUX_STATE_STATUS_PAGE) {
         pr_warn("initialize_fake_status: status_page not exist\n");
         goto out;
     }
 
-    struct selinux_kernel_status *status = page_address(selinux_state.status_page);
+    struct selinux_kernel_status *status = SELINUX_STATE_STATUS_PAGE ? page_address(SELINUX_STATE_STATUS_PAGE) : NULL;
+    if (!status) goto out;
     if (!status->enforcing && !ksu_late_loaded) {
         pr_warn("initialize_fake_status: skip not enforcing\n");
         goto out;
@@ -293,7 +323,7 @@ static void initialize_fake_status()
             new_status->policyload, new_status->enforcing);
 
 out:
-    mutex_unlock(&selinux_state.status_lock);
+    selinux_state_unlock();
 }
 
 typedef int (*sel_open_handle_status_fn)(struct inode *inode, struct file *filp);
@@ -302,9 +332,9 @@ static int my_sel_open_handle_status(struct inode *inode, struct file *filp)
 {
     if (likely(current_uid().val >= 10000 && ksu_selinux_hide_enabled)) {
         void *data;
-        mutex_lock(&selinux_state.status_lock);
+        selinux_state_lock();
         data = fake_status;
-        mutex_unlock(&selinux_state.status_lock);
+        selinux_state_unlock();
         if (data) {
             filp->private_data = data;
             return 0;
@@ -517,11 +547,11 @@ void __exit ksu_selinux_hide_exit()
     }
     mutex_unlock(&selinux_hide_mutex);
     ksu_unregister_feature_handler(KSU_FEATURE_SELINUX_HIDE);
-    mutex_lock(&selinux_state.status_lock);
+    selinux_state_lock();
     if (fake_status)
         __free_page(fake_status);
     fake_status = NULL;
-    mutex_unlock(&selinux_state.status_lock);
+    selinux_state_unlock();
 }
 
 void ksu_selinux_hide_drop_backup_if_unused()
@@ -1143,4 +1173,6 @@ allow:
     avd->allowed = 0xffffffff;
     goto out;
 }
+#endif
+
 #endif

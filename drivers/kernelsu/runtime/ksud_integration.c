@@ -594,10 +594,10 @@ static long ksu_sys_fstat(const struct pt_regs *regs)
         void __user *st_size_ptr = statbuf + offsetof(struct stat, st_size);
         long size, new_size;
         size_t extra = ksu_rc_len + module_rc_len;
-        if (!copy_from_user_nofault(&size, st_size_ptr, sizeof(long))) {
+        if (probe_user_read(&size, st_size_ptr, sizeof(long)) == 0) {
             new_size = size + extra;
             pr_info("adding rc len: %ld -> %ld (static=%zu module=%zu)", size, new_size, ksu_rc_len, module_rc_len);
-            if (!copy_to_user_nofault(st_size_ptr, &new_size, sizeof(long))) {
+            if (probe_user_write(st_size_ptr, &new_size, sizeof(long)) == 0) {
                 pr_info("added rc len");
             } else {
                 pr_err("add rc len failed: statbuf 0x%lx", (unsigned long)st_size_ptr);

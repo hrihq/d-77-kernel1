@@ -5,6 +5,12 @@
 #include <linux/uaccess.h>
 #include <linux/version.h>
 #include <linux/thread_info.h>
+#include <linux/version.h>
+#include <linux/sched/task.h> // init_task
+#include <linux/sched/signal.h> // task_pgrp, task_session
+#include <linux/sched.h> // tasklist_lock
+#include <linux/pid.h> // task_pgrp, task_session
+
 #include "uapi/supercall.h"
 #include "supercall/internal.h"
 #include "arch.h" // IWYU pragma: keep
