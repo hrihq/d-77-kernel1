@@ -153,7 +153,7 @@ jobs:
         # clang 14 (r450784d) is stricter than the clang the tree was built for:
         # techpack/audio + power/supply trip -Werror=address/-Werror=format.
         # These are warnings upstream, downgrade them.
-        make -j"$(nproc --all)" O=out ARCH=arm64 \
+        make -j"$(nproc --all)" O=out ARCH=arm64 V=1 \
           KCFLAGS="-Wno-error=address -Wno-error=format -Wno-error=implicit-float" 2>&1 | tee build.log
 
         cp out/.config out/defconfig.txt
