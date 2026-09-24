@@ -116,6 +116,8 @@ jobs:
         export KBUILD_BUILD_USER=hrihq
         export KBUILD_BUILD_HOST=D-77
         export PATH="$CLANG_PATH/bin:$PATH"
+        export LLVM=1
+        export LLVM_IAS=1
         export CC=clang
         export LD=ld.lld
         export CROSS_COMPILE=aarch64-linux-gnu-
@@ -133,7 +135,11 @@ jobs:
 
         make O=out ARCH=arm64 vendor/sweet_user_defconfig
 
-        make -j"$(nproc --all)" O=out ARCH=arm64 2>&1 | tee build.log
+        # clang 14 (r450784d) is stricter than the clang the tree was built for:
+        # techpack/audio + power/supply trip -Werror=address/-Werror=format.
+        # These are warnings upstream, downgrade them.
+        make -j"$(nproc --all)" O=out ARCH=arm64 \
+          KCFLAGS="-Wno-error=address -Wno-error=format -Wno-error=implicit-float" 2>&1 | tee build.log
 
         cp out/.config out/defconfig.txt
 
