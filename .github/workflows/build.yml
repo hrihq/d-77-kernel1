@@ -127,6 +127,10 @@ jobs:
         export NM=$CLANG_PATH/bin/llvm-nm
         export OBJCOPY=$CLANG_PATH/bin/llvm-objcopy
         export STRIP=$CLANG_PATH/bin/llvm-strip
+        # Host tools (fixdep, dtc, kconfig) must link against the distro libc,
+        # not clang's bundled lld/sysroot; system gcc is right for that.
+        export HOSTCC=gcc
+        export HOSTCXX=g++
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
         export KBUILD_COMPILER_STRING="$("$CLANG_PATH/bin/clang" --version | head -n1)"
@@ -142,26 +146,15 @@ jobs:
 
         make O=out ARCH=arm64 vendor/sweet_user_defconfig
 
-        # Debug: verify the compiler probes the tree runs at prepare-compiler-check
-        echo "=== compiler probe diagnostics ==="
-        "$CLANG_PATH/bin/clang" --version | head -n1
-        PROBE_FLAGS="-Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
-          -fno-strict-aliasing -fno-common -fshort-wchar \
-          -Werror-implicit-function-declaration -Wno-format-security -std=gnu89 \
-          --target=aarch64-linux-gnu --prefix=aarch64-linux-gnu- --gcc-toolchain=/ \
-          -no-integrated-as -Werror=unknown-warning-option -Werror"
-        "$CLANG_PATH/bin/clang" $PROBE_FLAGS -fstack-protector-strong \
-          -c -x c /dev/null -o /tmp/probe.o && echo "PROBE OK" || echo "PROBE FAILED"
-        "$CLANG_PATH/bin/clang" $PROBE_FLAGS -c -x c /dev/null -o /tmp/probe2.o \
-          && echo "BASE PROBE OK" || echo "BASE PROBE FAILED"
-        echo "=== which elfedit ==="
-        which aarch64-linux-gnu-elfedit || echo "no elfedit (expected)"
-        echo "CC=$CC LD=$LD"
-
+        # LLVM=1 makes the tree force HOSTCC=clang, which then links host tools
+        # (dtc needs -lyaml) against clang's bundled lld and cannot find the
+        # distro libyaml. Pin host toolchain to system gcc via the make command
+        # line, which overrides the Makefile assignment.
         # clang 14 (r450784d) is stricter than the clang the tree was built for:
         # techpack/audio + power/supply trip -Werror=address/-Werror=format.
         # These are warnings upstream, downgrade them.
         make -j"$(nproc --all)" O=out ARCH=arm64 V=1 \
+          HOSTCC=gcc HOSTCXX=g++ \
           KCFLAGS="-Wno-error=address -Wno-error=format -Wno-error=implicit-float" 2>&1 | tee build.log
 
         cp out/.config out/defconfig.txt
