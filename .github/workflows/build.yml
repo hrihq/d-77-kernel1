@@ -155,7 +155,7 @@ jobs:
         # These are warnings upstream, downgrade them.
         make -j"$(nproc --all)" O=out ARCH=arm64 V=1 \
           HOSTCC=gcc HOSTCXX=g++ \
-          KCFLAGS="-Wno-error=address -Wno-error=format -Wno-error=implicit-float" 2>&1 | tee build.log
+          KCFLAGS="-Wno-error=address -Wno-error=format" 2>&1 | tee build.log
 
         cp out/.config out/defconfig.txt
 
