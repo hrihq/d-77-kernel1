@@ -2,8 +2,8 @@
 VERSION = 4
 PATCHLEVEL = 14
 SUBLEVEL = 336
-EXTRAVERSION =
-NAME = Petit Gorille
+EXTRAVERSION = -D77-kernel1
+NAME = D-77 Kernel1
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
