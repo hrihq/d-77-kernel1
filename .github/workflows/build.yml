@@ -13,14 +13,6 @@ on:
         options:
           - MIUI-OOS
           - AOSP
-      compiler:
-        description: 'Select Compiler'
-        required: true
-        default: 'AOSP-Clang'
-        type: choice
-        options:
-          - AOSP-Clang
-          - Neutron-Clang
 
 jobs:
   build:
@@ -44,7 +36,7 @@ jobs:
         sudo apt-get install -y \
           bc cpio flex bison git python-is-python3 tar perl wget curl \
           aria2 lz4 libssl-dev libelf-dev libyaml-dev dwarves zip zstd \
-          gcc-aarch64-linux-gnu build-essential
+          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi build-essential
 
     - name: Setup Environment
       run: |
@@ -56,25 +48,32 @@ jobs:
       run: |
         set -e
         mkdir -p clang
-        if [[ "${{ github.event.inputs.compiler || 'AOSP-Clang' }}" == "Neutron-Clang" ]]; then
-          echo "Using Neutron Clang"
-          CLANG_URL=$(curl -fsSL \
-            https://api.github.com/repos/Neutron-Toolchains/clang-build-catalogue/releases/latest |
-            grep "browser_download_url" | grep "neutron-clang" | head -n 1 | cut -d '"' -f 4)
-          echo "Downloading: $CLANG_URL"
-          curl -L "$CLANG_URL" -o neutron-clang.tar.zst
-          tar -C clang -xf neutron-clang.tar.zst
-          rm -f neutron-clang.tar.zst
-        else
-          echo "Using AOSP Clang"
-          CLANG_URL=$(curl -fsSL \
-            https://api.github.com/repos/bachnxuan/aosp_clang_mirror/releases/latest |
-            grep "browser_download_url" | grep -E 'clang-.*\.tar\.gz' | head -n 1 | cut -d '"' -f 4)
-          echo "Downloading: $CLANG_URL"
-          curl -L "$CLANG_URL" -o clang.tar.gz
-          tar -C clang -xf clang.tar.gz
+
+        CLANG_TARBALL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r450784d.tar.gz"
+
+        echo "Downloading AOSP clang r450784d (Android 13) from googlesource"
+        # retry loop: googlesource archives can truncate; verify with tar before accepting
+        ok=0
+        for attempt in 1 2 3 4 5; do
+          echo "attempt $attempt"
+          curl -fL --retry 3 --retry-delay 5 -C - -o clang.tar.gz "$CLANG_TARBALL_URL"
+          if tar tzf clang.tar.gz >/dev/null 2>&1; then
+            ok=1
+            echo "archive OK"
+            break
+          fi
+          echo "archive corrupt, retrying"
           rm -f clang.tar.gz
+          sleep $((attempt * 5))
+        done
+        if [ "$ok" -ne 1 ]; then
+          echo "FAILED to download a valid clang archive"
+          exit 1
         fi
+
+        tar -C clang -xzf clang.tar.gz
+        rm -f clang.tar.gz
+
         echo "CLANG_PATH=$GITHUB_WORKSPACE/clang" >> "$GITHUB_ENV"
         echo
         echo "Compiler:"
@@ -127,7 +126,7 @@ jobs:
         echo "       D-77 Kernel1 Compilation"
         echo "========================================="
         echo "Build type : ${{ github.event.inputs.build_type || 'MIUI-OOS' }}"
-        echo "Compiler   : ${{ github.event.inputs.compiler || 'AOSP-Clang' }}"
+        echo "Compiler   : AOSP clang r450784d (googlesource)"
         echo "Date       : $BUILD_DATE"
         echo "Jobs       : $(nproc --all)"
         echo "========================================="
@@ -196,7 +195,7 @@ jobs:
           echo "## D-77 Kernel1 - Redmi Note 12 Pro 4G (sweet_k6a)"
           echo ""
           echo "- Build type: ${{ github.event.inputs.build_type || 'MIUI-OOS' }}"
-          echo "- Compiler: ${{ github.event.inputs.compiler || 'AOSP-Clang' }}"
+          echo "- Compiler: AOSP clang r450784d (googlesource)"
           echo "- Kernel: 4.14.336-D77-kernel1"
           echo "- KernelSU-Next v3.4.0 (syscall table hook, 4.14-compat)"
           echo "- fake uname 6.12.13 (netbpfload / Android 16 BPF)"
